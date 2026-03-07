@@ -1,0 +1,8 @@
+google-auth
+google-cloud-storage
+google-cloud-firestore
+httpx
+fastapi
+python-multipart
+pydantic-settings
+uvicorn
