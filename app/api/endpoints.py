@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.services.vertex_service import generate_video_async, extend_video_async, get_operation_status
 from app.services.gcs_service import get_output_uri, generate_signed_url, get_bucket
 from app.services.firestore_service import create_video_job, get_video_job, update_video_job, list_video_jobs
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +77,6 @@ class VideoExtendRequest(BaseModel):
 @router.post("/extend", response_model=VideoGenerateResponse, status_code=status.HTTP_202_ACCEPTED)
 async def extend_video(req: VideoExtendRequest):
     try:
-        from app.core.config import settings
-        
         # Verify the original video exists and is completed
         job = get_video_job(req.video_id)
         if not job or job.get("status") != "COMPLETED":
@@ -85,8 +84,10 @@ async def extend_video(req: VideoExtendRequest):
             
         new_video_id = str(uuid.uuid4())
         
-        # The gcs_uri for the original video based on our base64 upload logic (always named video.mp4 inside the uuid prefix)
-        original_gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/videos/{req.video_id}/video.mp4"
+        # Get the actual GCS URI from the completed job metadata, fallback if legacy
+        original_gcs_uri = job.get("gcs_uri")
+        if not original_gcs_uri:
+            original_gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/videos/{req.video_id}/video.mp4"
         
         new_output_uri = get_output_uri(new_video_id)
         
@@ -202,13 +203,16 @@ async def get_video_status(video_id: str):
             blobs = list(bucket.list_blobs(prefix=prefix))
             
             video_url = None
+            gcs_uri = None
             if blobs:
                 mp4_blobs = [b for b in blobs if b.name.endswith(".mp4")]
                 if mp4_blobs:
                     video_blob = mp4_blobs[0]
                     video_url = generate_signed_url(video_blob.name)
+                    gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/{video_blob.name}"
                 else:
                     video_url = generate_signed_url(blobs[0].name)
+                    gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/{blobs[0].name}"
             
             # If not in the bucket, Veo returns the video as Base64 in the response body!
             if not video_url:
@@ -236,6 +240,7 @@ async def get_video_status(video_id: str):
                         blob = bucket.blob(blob_name)
                         blob.upload_from_string(video_bytes, content_type="video/mp4")
                         video_url = generate_signed_url(blob_name)
+                        gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/{blob_name}"
                     except Exception as upload_err:
                         logger.error(f"Failed to upload base64 video to GCS: {upload_err}")
                 
@@ -266,7 +271,8 @@ async def get_video_status(video_id: str):
             # Update Firestore with completion
             update_video_job(video_id, {
                 "status": "COMPLETED",
-                "final_url": video_url
+                "final_url": video_url,
+                "gcs_uri": gcs_uri
             })
 
             return {
