@@ -53,6 +53,7 @@ async def generate_video_async(
             "sampleCount": 1,
             "durationSeconds": duration_seconds,
             "aspectRatio": aspect_ratio,
+            "personGeneration": "ALLOW_ADULT",
             "output_storage_uri": output_uri,
             "storageUri": output_uri
         }
@@ -109,6 +110,7 @@ async def extend_video_async(
             "sampleCount": 1,
             "durationSeconds": duration_seconds,
             "aspectRatio": aspect_ratio,
+            "personGeneration": "ALLOW_ADULT",
             "output_storage_uri": output_uri,
             "storageUri": output_uri
         }

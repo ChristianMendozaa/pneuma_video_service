@@ -37,3 +37,19 @@ def update_video_job(video_id: str, updates: dict) -> None:
         updates["updated_at"] = firestore.SERVER_TIMESTAMP
         
     doc_ref.update(updates)
+
+def list_video_jobs() -> list:
+    db = get_firestore_client()
+    docs = db.collection("video_jobs").order_by("created_at", direction=firestore.Query.DESCENDING).stream()
+    
+    jobs = []
+    for doc in docs:
+        job = doc.to_dict()
+        # Convert DatetimeWithNanoseconds to string for JSON serialization
+        if "created_at" in job and hasattr(job["created_at"], "isoformat"):
+            job["created_at"] = job["created_at"].isoformat()
+        if "updated_at" in job and hasattr(job["updated_at"], "isoformat"):
+            job["updated_at"] = job["updated_at"].isoformat()
+        jobs.append(job)
+        
+    return jobs

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from app.services.vertex_service import generate_video_async, extend_video_async, get_operation_status
 from app.services.gcs_service import get_output_uri, generate_signed_url, get_bucket
-from app.services.firestore_service import create_video_job, get_video_job, update_video_job
+from app.services.firestore_service import create_video_job, get_video_job, update_video_job, list_video_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,8 @@ async def generate_video(
     images: List[UploadFile] = File(...),
     prompt_veo_visual: str = Form(...),
     prompt_veo_audio: str = Form(""),
-    aspect_ratio: str = Form("16:9")
+    aspect_ratio: str = Form("16:9"),
+    script_text: str = Form("")
 ):
     try:
         if len(images) > 3:
@@ -50,7 +51,8 @@ async def generate_video(
             "prompt_visual": prompt_veo_visual,
             "prompt_audio": prompt_veo_audio,
             "duration": 8,
-            "aspect_ratio": aspect_ratio
+            "aspect_ratio": aspect_ratio,
+            "script_text": script_text
         }
         
         create_video_job(video_id, operation_name, metadata)
@@ -69,6 +71,7 @@ class VideoExtendRequest(BaseModel):
     video_id: str
     prompt_veo_visual: str
     prompt_veo_audio: str = ""
+    script_text: str = ""
 
 @router.post("/extend", response_model=VideoGenerateResponse, status_code=status.HTTP_202_ACCEPTED)
 async def extend_video(req: VideoExtendRequest):
@@ -103,7 +106,8 @@ async def extend_video(req: VideoExtendRequest):
             "original_video_id": req.video_id,
             "prompt_visual": req.prompt_veo_visual,
             "duration": 7,
-            "aspect_ratio": original_aspect_ratio
+            "aspect_ratio": original_aspect_ratio,
+            "script_text": req.script_text
         }
         
         create_video_job(new_video_id, operation_name, metadata)
@@ -118,6 +122,30 @@ async def extend_video(req: VideoExtendRequest):
         raise
     except Exception as e:
         logger.error(f"Error starting video extension: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/list")
+async def get_all_videos():
+    try:
+        jobs = list_video_jobs()
+        updated_jobs = []
+        
+        for job in jobs:
+            # Auto-heal jobs that are stuck in PROCESSING state
+            if job.get("status") == "PROCESSING":
+                video_id = job.get("video_id")
+                try:
+                    # get_video_status will automatically update Firestore if it finished
+                    live_status = await get_video_status(video_id)
+                    job.update(live_status)
+                except Exception as ex:
+                    logger.warning(f"Error auto-updating status for {video_id}: {ex}")
+            # Ensure proper typing for datetime serialization, just in case firestore outputs DatetimeWithNanoseconds
+            updated_jobs.append(job)
+            
+        return {"videos": updated_jobs}
+    except Exception as e:
+        logger.error(f"Error listing video jobs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/status/{video_id:path}")
@@ -145,6 +173,9 @@ async def get_video_status(video_id: str):
             
         # If PROCESSING, get the underlying Vertex AI operation id
         operation_id = job.get("operation_id")
+        if not operation_id:
+            return job # Safety fallback if operation_id is missing
+            
         decoded_op_id = urllib.parse.unquote(operation_id)
         
         op_status = await get_operation_status(decoded_op_id)
@@ -209,7 +240,19 @@ async def get_video_status(video_id: str):
                         logger.error(f"Failed to upload base64 video to GCS: {upload_err}")
                 
             if not video_url:
-                err_msg = "Video generated but not found in bucket and no Base64 video data returned."
+                err_msg = "El video no pudo generarse. Vertex AI puede haber bloqueado el contenido por filtros de seguridad."
+                resp = op_status.get("response", {})
+                if isinstance(resp, dict):
+                    # Sometimes Vertex returns safety ratings or block reasons inside the response payload
+                    if "error" in resp:
+                        err_msg = f"Error Vertex AI: {resp.get('error')}"
+                    elif "blockReason" in resp:
+                        err_msg = f"Filtro de Seguridad Vertex AI: {resp.get('blockReason')}"
+                    else:
+                        # Append stringified payload for debugging just in case
+                        safe_resp = {k: v for k, v in resp.items() if "bytesBase64Encoded" not in str(v)}
+                        err_msg += f" Detalles: {safe_resp}"
+                        
                 update_video_job(video_id, {
                     "status": "FAILED",
                     "error": err_msg
