@@ -3,6 +3,7 @@ from typing import List
 import logging
 import urllib.parse
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.services.vertex_service import generate_video_async, extend_video_async, get_operation_status
@@ -293,3 +294,53 @@ async def get_video_status(video_id: str):
     except Exception as e:
         logger.error(f"Error getting video status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/download/{video_id:path}")
+async def download_video(video_id: str):
+    try:
+        job = get_video_job(video_id)
+        if not job or job.get("status") != "COMPLETED":
+            raise HTTPException(status_code=404, detail="Video not found or not completed.")
+            
+        gcs_uri = job.get("gcs_uri")
+        if not gcs_uri:
+            # Fallback legacy
+            from app.core.config import settings
+            gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/videos/{video_id}/video.mp4"
+            
+        # Parse gs:// URI
+        if not gcs_uri.startswith("gs://"):
+            raise HTTPException(status_code=400, detail="Invalid GCS URI.")
+            
+        parts = gcs_uri.replace("gs://", "").split("/", 1)
+        if len(parts) != 2:
+            raise HTTPException(status_code=400, detail="Malformed GCS URI.")
+            
+        bucket_name, blob_name = parts
+        
+        bucket = get_bucket()
+        blob = bucket.blob(blob_name)
+        
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail="File not found in bucket.")
+            
+        def iterfile():
+            # Download file in chunks and yield
+            yield from blob.download_as_bytes(raw_download=True)
+            # Alternatively use blob.download_as_string() if small, or better yet, proper streaming:
+        
+        # Simple read since 8s videos are ~1MB
+        file_bytes = blob.download_as_bytes()
+        
+        import io
+        return StreamingResponse(
+            io.BytesIO(file_bytes),
+            media_type="video/mp4",
+            headers={"Content-Disposition": f'attachment; filename="easymarket_video_{video_id[:8]}.mp4"'}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading video: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
