@@ -46,7 +46,7 @@ async def generate_video_async(
     payload = {
         "instances": [instance_data],
         "parameters": {
-            "generateAudio": False,
+            "generateAudio": True,
             "resolution": "1080p",
             "sampleCount": 1,
             "durationSeconds": duration_seconds,
