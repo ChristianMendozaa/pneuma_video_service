@@ -100,7 +100,7 @@ async def extend_video_async(
             }
         ],
         "parameters": {
-            "generateAudio": False,
+            "generateAudio": True,
             "resolution": "1080p",
             "sampleCount": 1,
             "durationSeconds": duration_seconds,
