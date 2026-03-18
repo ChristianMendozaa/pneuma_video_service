@@ -2,7 +2,7 @@ import httpx
 import base64
 import google.auth.transport.requests
 import re
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from app.core.config import settings
 from app.core.security import get_gcp_credentials
@@ -20,35 +20,33 @@ def get_vertex_endpoint(path: str = "models/veo-3.1-fast-generate-001:predictLon
     return f"{base_url}/projects/{project_id}/locations/{region}/publishers/google/{path}"
 
 async def generate_video_async(
-    image_bytes: bytes,
-    prompt_visual: str,
-    prompt_audio: str,
+    prompt: str,
     duration_seconds: int,
     aspect_ratio: str,
     output_uri: str,
+    image_bytes: Optional[bytes] = None,
     mime_type: str = "image/jpeg"
 ) -> str:
     token = await get_access_token()
     endpoint = get_vertex_endpoint()
     
-    image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+    final_prompt = prompt
+        
+    instance_data = {
+        "prompt": final_prompt
+    }
     
-    final_prompt = prompt_visual
-    if prompt_audio:
-        final_prompt += f"\nAudio instructions: {prompt_audio}"
+    if image_bytes:
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        instance_data["image"] = {
+            "bytesBase64Encoded": image_b64,
+            "mimeType": mime_type
+        }
         
     payload = {
-        "instances": [
-            {
-                "prompt": final_prompt,
-                "image": {
-                    "bytesBase64Encoded": image_b64,
-                    "mimeType": mime_type
-                }
-            }
-        ],
+        "instances": [instance_data],
         "parameters": {
-            "generateAudio": bool(prompt_audio),
+            "generateAudio": False,
             "resolution": "1080p",
             "sampleCount": 1,
             "durationSeconds": duration_seconds,
@@ -81,8 +79,7 @@ async def generate_video_async(
 
 async def extend_video_async(
     video_uri: str,
-    prompt_visual: str,
-    prompt_audio: str,
+    prompt: str,
     output_uri: str,
     duration_seconds: int = 5,
     aspect_ratio: str = "16:9"
@@ -90,9 +87,7 @@ async def extend_video_async(
     token = await get_access_token()
     endpoint = get_vertex_endpoint()
     
-    final_prompt = prompt_visual
-    if prompt_audio:
-        final_prompt += f"\nAudio instructions: {prompt_audio}"
+    final_prompt = prompt
         
     payload = {
         "instances": [
@@ -105,7 +100,7 @@ async def extend_video_async(
             }
         ],
         "parameters": {
-            "generateAudio": bool(prompt_audio),
+            "generateAudio": False,
             "resolution": "1080p",
             "sampleCount": 1,
             "durationSeconds": duration_seconds,

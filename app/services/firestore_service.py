@@ -9,7 +9,7 @@ def get_firestore_client() -> firestore.Client:
 
 def create_video_job(video_id: str, operation_id: str, metadata: dict) -> None:
     db = get_firestore_client()
-    doc_ref = db.collection("video_jobs").document(video_id)
+    doc_ref = db.collection("own_videos").document(video_id)
     
     doc_ref.set({
         "video_id": video_id,
@@ -21,7 +21,7 @@ def create_video_job(video_id: str, operation_id: str, metadata: dict) -> None:
 
 def get_video_job(video_id: str) -> dict:
     db = get_firestore_client()
-    doc_ref = db.collection("video_jobs").document(video_id)
+    doc_ref = db.collection("own_videos").document(video_id)
     doc = doc_ref.get()
     
     if doc.exists:
@@ -30,7 +30,7 @@ def get_video_job(video_id: str) -> dict:
 
 def update_video_job(video_id: str, updates: dict) -> None:
     db = get_firestore_client()
-    doc_ref = db.collection("video_jobs").document(video_id)
+    doc_ref = db.collection("own_videos").document(video_id)
     
     # Adding updated_at timestamp natively
     if "updated_at" not in updates:
@@ -40,7 +40,7 @@ def update_video_job(video_id: str, updates: dict) -> None:
 
 def list_video_jobs() -> list:
     db = get_firestore_client()
-    docs = db.collection("video_jobs").order_by("created_at", direction=firestore.Query.DESCENDING).stream()
+    docs = db.collection("own_videos").order_by("created_at", direction=firestore.Query.DESCENDING).stream()
     
     jobs = []
     for doc in docs:

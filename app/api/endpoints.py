@@ -1,5 +1,5 @@
 import uuid
-from typing import List
+from typing import List, Optional
 import logging
 import urllib.parse
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
@@ -20,37 +20,40 @@ class VideoGenerateResponse(BaseModel):
 
 @router.post("/generate", response_model=VideoGenerateResponse, status_code=status.HTTP_202_ACCEPTED)
 async def generate_video(
-    images: List[UploadFile] = File(...),
-    prompt_veo_visual: str = Form(...),
-    prompt_veo_audio: str = Form(""),
+    prompt: str = Form(...),
     aspect_ratio: str = Form("16:9"),
-    script_text: str = Form("")
+    script_text: str = Form(""),
+    images: Optional[List[UploadFile]] = File(None)
 ):
     try:
-        if len(images) > 3:
+        # Check if list of images exists and has valid files
+        valid_images = [img for img in (images or []) if img.filename and getattr(img, 'size', 1) > 0]
+        
+        if len(valid_images) > 3:
             raise HTTPException(status_code=400, detail="No se permiten más de 3 imágenes por solicitud para generar videos.")
             
         video_id = str(uuid.uuid4())
         # We give Veo a directory prefix to output the generated video utilizing our local UUID
         output_uri = get_output_uri(video_id)
 
-        # Veo online prediction takes a single base image. We use the first one provided.
-        image_bytes = await images[0].read()
-        mime_type = images[0].content_type or "image/jpeg"
+        image_bytes = None
+        mime_type = "image/jpeg"
+        
+        if valid_images:
+            image_bytes = await valid_images[0].read()
+            mime_type = valid_images[0].content_type or "image/jpeg"
         
         operation_name = await generate_video_async(
-            image_bytes=image_bytes,
-            prompt_visual=prompt_veo_visual,
-            prompt_audio=prompt_veo_audio,
+            prompt=prompt,
             duration_seconds=8,
             aspect_ratio=aspect_ratio,
             output_uri=output_uri,
+            image_bytes=image_bytes,
             mime_type=mime_type
         )
         
         metadata = {
-            "prompt_visual": prompt_veo_visual,
-            "prompt_audio": prompt_veo_audio,
+            "prompt": prompt,
             "duration": 8,
             "aspect_ratio": aspect_ratio,
             "script_text": script_text
@@ -70,8 +73,7 @@ async def generate_video(
 
 class VideoExtendRequest(BaseModel):
     video_id: str
-    prompt_veo_visual: str
-    prompt_veo_audio: str = ""
+    prompt: str
     script_text: str = ""
 
 @router.post("/extend", response_model=VideoGenerateResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -95,8 +97,7 @@ async def extend_video(req: VideoExtendRequest):
         
         operation_name = await extend_video_async(
             video_uri=original_gcs_uri,
-            prompt_visual=req.prompt_veo_visual,
-            prompt_audio=req.prompt_veo_audio,
+            prompt=req.prompt,
             output_uri=new_output_uri,
             duration_seconds=7,
             aspect_ratio=original_aspect_ratio
@@ -105,7 +106,7 @@ async def extend_video(req: VideoExtendRequest):
         metadata = {
             "type": "extension",
             "original_video_id": req.video_id,
-            "prompt_visual": req.prompt_veo_visual,
+            "prompt": req.prompt,
             "duration": 7,
             "aspect_ratio": original_aspect_ratio,
             "script_text": req.script_text

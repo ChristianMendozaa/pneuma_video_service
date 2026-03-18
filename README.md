@@ -45,8 +45,7 @@ Inicia un Video-to-Video generation job de **7 segundos**, usando como base fís
 ```json
 {
   "video_id": "c3fc1849-6a58-407b-bc54-a1dc407a34f7",
-  "prompt_veo_visual": "Camera follows the running character into the sunset.",
-  "prompt_veo_audio": "Epic rock music finale."
+  "prompt": "Camera follows the running character into the sunset. Epic rock music finale.",
 }
 ```
 *Atención:* El backend automáticamente lee el ticket antiguo Firestore de ese `video_id`, hereda obligatoriamente el `aspect_ratio` del video original, y lanza una extensión forzada a `7` segundos.
