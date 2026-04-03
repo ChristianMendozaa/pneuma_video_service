@@ -126,6 +126,21 @@ async def extend_video(req: VideoExtendRequest):
         logger.error(f"Error starting video extension: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def _freshen_job_url(job: dict) -> dict:
+    if job.get("status") == "COMPLETED":
+        gcs_uri = job.get("gcs_uri")
+        video_id = job.get("video_id")
+        if not gcs_uri and video_id:
+            gcs_uri = f"gs://{settings.GCS_BUCKET_NAME}/videos/{video_id}/video.mp4"
+        
+        if gcs_uri and gcs_uri.startswith(f"gs://{settings.GCS_BUCKET_NAME}/"):
+            blob_name = gcs_uri.replace(f"gs://{settings.GCS_BUCKET_NAME}/", "")
+            try:
+                job["final_url"] = generate_signed_url(blob_name)
+            except Exception as e:
+                logger.error(f"Error generating fresh URL for {video_id}: {e}")
+    return job
+
 @router.get("/list")
 async def get_all_videos():
     try:
@@ -142,6 +157,9 @@ async def get_all_videos():
                     job.update(live_status)
                 except Exception as ex:
                     logger.warning(f"Error auto-updating status for {video_id}: {ex}")
+            
+            job = _freshen_job_url(job)
+            
             # Ensure proper typing for datetime serialization, just in case firestore outputs DatetimeWithNanoseconds
             updated_jobs.append(job)
             
@@ -161,6 +179,7 @@ async def get_video_status(video_id: str):
         current_status = job.get("status")
         
         if current_status == "COMPLETED":
+            job = _freshen_job_url(job)
             return {
                 "video_id": video_id,
                 "status": "COMPLETED",
